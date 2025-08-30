@@ -1,0 +1,94 @@
+Task: Fix dots.ocr Runner for 4-bit Version (Windows, RTX 4060 8GB)
+Context
+
+We are migrating from the original rednote-hilab/dots.ocr to the 4-bit quantized version (helizac/dots.ocr-4bit).
+
+The FP32/BF16 runner (dots_ocr_run.py) loads but only echoes the prompt (likely wrong input construction).
+
+The 4-bit runner (dots_ocr_run_4bit.py) hits flash_attn import errors on Windows. We need a path that avoids flash-attn and runs on consumer GPU.
+
+Environment
+
+OS: Windows 11
+
+GPU: RTX 4060 Laptop (8GB VRAM)
+
+CPU: AMD Ryzen 7 7435HS
+
+RAM: 64 GB
+
+Python: 3.13.x
+
+Pip: latest
+
+PyTorch: 2.6.0+cu124
+
+Transformers: 4.55.2
+
+Accelerate: 1.10.0
+
+Bitsandbytes: 0.47.0
+
+Other: sentencepiece, peft, huggingface_hub installed
+
+What We Expect
+
+Goal: OCR of visible text in screenshots / UI captures.
+
+Expected: Model returns recognized text.
+
+Actual:
+
+FP/BF16 runner → repeats the prompt.
+
+4-bit runner → ImportError: flash_attn not found.
+
+Key Findings (dump_config.py)
+
+image_token_id = 151665
+
+Chat template is present (tokenizer.apply_chat_template = True).
+
+Special tokens: <|vision_start|>, <|vision_end|>, <|vision_pad|> etc.
+
+Placeholders like <image> are not in vocab.
+
+Interpretation: must use chat template + processor path, not manual <image> tokens.
+
+VRAM Constraints
+
+GPU is 8 GB VRAM.
+
+Running full 1920×1080 images produces 966 visual tokens → OOM.
+
+Need to:
+
+Add option to cap visual tokens (downscale if > N).
+
+Or rely on quantized 4-bit path.
+
+Minimal Acceptance Criteria
+
+Keep all working parts intact (dtype/device logic, BCHW, etc).
+
+For 4-bit:
+
+Use processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+Use process_vision_info(messages) for image tensors
+
+Use processor(..., return_tensors="pt") to build inputs for model.generate()
+
+Must run on Windows without flash-attn
+
+Must fit into 8 GB VRAM (downscale/cap if needed)
+
+For FP/BF16: correct input construction so model stops echoing prompt.
+
+Logs Provided
+
+dump_config_output.txt
+
+runner_output_working.txt (echoing prompt)
+
+runner_output_4bit.txt (flash_attn error)

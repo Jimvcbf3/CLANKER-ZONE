@@ -1,0 +1,86 @@
+Microsoft Windows [Version 10.0.26100.4946]
+(c) Microsoft Corporation. All rights reserved.
+
+C:\Users\jim94>py -u C:\ai-auto\dump_config.py --model C:\ai-auto\dots_ocr
+[info] Loading model + tokenizer from C:\ai-auto\dots_ocr ...
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+Loading checkpoint shards: 100%|█████████████████████████████████████████████████████████| 2/2 [00:02<00:00,  1.21s/it]
+
+===== MODEL CONFIG (keys of interest) =====
+model_type: dots_ocr
+vision_tower: None
+image_token: None
+visual_token: None
+image_token_index: None
+image_token_id: 151665
+spatial_merge_size: None
+
+===== TOKENIZER SPECIAL TOKENS =====
+special_tokens_map: {'eos_token': '<|endoftext|>', 'pad_token': '[PAD]', 'additional_special_tokens': ['<|im_start|>', '<|im_end|>', '<|object_ref_start|>', '<|object_ref_end|>', '<|box_start|>', '<|box_end|>', '<|quad_start|>', '<|quad_end|>', '<|vision_start|>', '<|vision_end|>', '<|vision_pad|>', '<|image_pad|>', '<|video_pad|>']}
+additional_special_tokens: ['<|im_start|>', '<|im_end|>', '<|object_ref_start|>', '<|object_ref_end|>', '<|box_start|>', '<|box_end|>', '<|quad_start|>', '<|quad_end|>', '<|vision_start|>', '<|vision_end|>', '<|vision_pad|>', '<|image_pad|>', '<|video_pad|>']
+
+===== CHAT TEMPLATE SUPPORT =====
+tokenizer.apply_chat_template: True
+chat_template present: True
+chat_template (first 400 chars):
+{%- for m in messages %}
+    {%- if m.role == 'system' %}
+        {{- '<|system|>' + m.content + '<|endofsystem|>\n' }}
+    {%- elif m.role == 'user' %}
+        {{- '<|user|>' + m.content + '<|endofuser|>' }}
+    {%- elif m.role == 'assistant' %}
+        {{- '<|assistant|>' + m.content }}
+        {%- if not loop.last %}
+            {{- '<|endofassistant|>' }}
+        {%- endif %}
+    {%- endif %}
+
+
+===== PLACEHOLDER PROBES =====
+'<image>' -> token_id: None
+'<img>' -> token_id: None
+'<image_token>' -> token_id: None
+
+===== RESOLVED IMAGE TOKEN ID =====
+source: image_token_id  |  token_id: 151665

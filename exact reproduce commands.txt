@@ -1,0 +1,3 @@
+py -u C:\ai-auto\dots_ocr_run.py --model C:\ai-auto\dots_ocr --image C:\ai-auto\test.png --prompt "Read all visible text and return as plain text." --max-new 256 --dtype bf16
+py -u C:\ai-auto\dots_ocr_run_4bit.py --image C:\ai-auto\test.png --prompt "Read all visible text and return as plain text." --max-new 256
+py -u C:\ai-auto\dump_config.py --model C:\ai-auto\dots_ocr

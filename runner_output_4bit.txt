@@ -1,0 +1,46 @@
+Microsoft Windows [Version 10.0.26100.4946]
+(c) Microsoft Corporation. All rights reserved.
+
+C:\Users\jim94>py -u C:\ai-auto\dots_ocr_run_4bit.py ^
+More?   --image C:\ai-auto\test.png ^
+More?   --prompt "Read all visible text and return as plain text." ^
+More?   --max-new 256
+[load] model=helizac/dots.ocr-4bit dtype=torch.bfloat16 device_map=auto
+Encountered exception while importing flash_attn: No module named 'flash_attn'
+Traceback (most recent call last):
+  File "C:\ai-auto\dots_ocr_run_4bit.py", line 82, in <module>
+    main()
+    ~~~~^^
+  File "C:\ai-auto\dots_ocr_run_4bit.py", line 33, in main
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID,
+    ...<2 lines>...
+        device_map=device_map,
+    )
+  File "C:\Users\jim94\AppData\Local\Programs\Python\Python313\Lib\site-packages\transformers\models\auto\auto_factory.py", line 582, in from_pretrained
+    model_class = get_class_from_dynamic_module(
+        class_ref, pretrained_model_name_or_path, code_revision=code_revision, **hub_kwargs, **kwargs
+    )
+  File "C:\Users\jim94\AppData\Local\Programs\Python\Python313\Lib\site-packages\transformers\dynamic_module_utils.py", line 570, in get_class_from_dynamic_module
+    final_module = get_cached_module_file(
+        repo_id,
+    ...<8 lines>...
+        repo_type=repo_type,
+    )
+  File "C:\Users\jim94\AppData\Local\Programs\Python\Python313\Lib\site-packages\transformers\dynamic_module_utils.py", line 433, in get_cached_module_file
+    get_cached_module_file(
+    ~~~~~~~~~~~~~~~~~~~~~~^
+        pretrained_model_name_or_path,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<8 lines>...
+        _commit_hash=commit_hash,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\jim94\AppData\Local\Programs\Python\Python313\Lib\site-packages\transformers\dynamic_module_utils.py", line 393, in get_cached_module_file
+    modules_needed = check_imports(resolved_module_file)
+  File "C:\Users\jim94\AppData\Local\Programs\Python\Python313\Lib\site-packages\transformers\dynamic_module_utils.py", line 225, in check_imports
+    raise ImportError(
+    ...<2 lines>...
+    )
+ImportError: This modeling file requires the following packages that were not found in your environment: flash_attn. Run `pip install flash_attn`

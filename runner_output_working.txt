@@ -1,0 +1,67 @@
+Microsoft Windows [Version 10.0.26100.4946]
+(c) Microsoft Corporation. All rights reserved.
+
+C:\Users\jim94>py -u C:\ai-auto\dots_ocr_run.py ^
+More?   --model C:\ai-auto\dots_ocr ^
+More?   --image C:\ai-auto\test.png ^
+More?   --prompt "Read all visible text and return as plain text." ^
+More?   --max-new 256 ^
+More?   --dtype bf16 ^
+More?   --max-vis-tokens 700
+[boot] device=cuda dtype=torch.bfloat16
+[load] processor from C:\ai-auto\dots_ocr
+[load] model (this may take a bit)…
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+flash attention not available! fallback to eager implementation
+Loading checkpoint shards: 100%|█████████████████████████████████████████████████████████| 2/2 [00:04<00:00,  2.03s/it]
+[load] model ready (weight dtype=torch.bfloat16)
+[img ] loaded: C:\ai-auto\test.png
+[resize] (1029x1920) -> (1036x1932) (factor=28=patch14*merge2)
+[vram] vis_tokens 2553 > cap 700 -> downscale to 1008x532
+[vram] new vis_tokens=684
+[shapes] input_ids=(1, 694) pixel_values=(1, 3, 532, 1008) grid=(1, 3)
+The following generation flags are not valid and may be ignored: ['temperature']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+
+===== OCR OUTPUT =====
+Read all visible text and return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the return as plain text. The text and the
+======================
