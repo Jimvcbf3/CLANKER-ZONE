@@ -163,23 +163,22 @@ def main():
     def _clean_ocr(text: str) -> str:
         import re
         from collections import Counter
+        text = text.replace("", "")
         lines = [re.sub(r"\s+", " ", ln).strip() for ln in text.splitlines()]
         lines = [ln for ln in lines if ln]
-        cleaned = []
-        last = None
-        run = 0
+
+        cleaned, last, run = [], None, 0
         for ln in lines:
             if ln == last:
                 run += 1
                 if run <= 3:
                     cleaned.append(ln)
             else:
-                last = ln
-                run = 1
+                last, run = ln, 1
                 cleaned.append(ln)
+
         freq = Counter(cleaned)
-        final = []
-        short_count = {}
+        final, short_count = [], {}
         for ln in cleaned:
             if len(ln.split()) == 1 and len(ln) <= 5 and freq[ln] > 6:
                 c = short_count.get(ln, 0) + 1
@@ -190,6 +189,7 @@ def main():
             final.append(ln)
         return "
 ".join(final)
+
     # Debug: verify expansion and shapes before decoding
     image_token_id = getattr(model.config, "image_token_id", tokenizer.convert_tokens_to_ids("<|imgpad|>"))
     expanded_count = (new_input_ids == image_token_id).sum().item()
