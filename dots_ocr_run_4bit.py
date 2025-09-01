@@ -139,17 +139,10 @@ def main():
     with torch.no_grad():
         output_ids = model.generate(**inputs, **gen_kwargs)
 
-    # The first sequence contains the full prompt + new tokens; we only decode new tokens
-    # But processor.decode can handle; simplest: decode all and strip prompt text prefix
-    decoded = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-
-    # Heuristic to remove the user prompt from the beginning if echoed
-    # Keep only after the last occurrence of the prompt string
-    out_text = decoded
-    if args.prompt in decoded:
-        idx = decoded.rfind(args.prompt)
-        out_text = decoded[idx + len(args.prompt):].strip()
-
+    # Decode only newly generated tokens to ensure output is printed and no echo
+    input_len = inputs['input_ids'].shape[1]
+    new_tokens = output_ids[0][input_len:]
+    out_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
     print(out_text.strip())
 
 
