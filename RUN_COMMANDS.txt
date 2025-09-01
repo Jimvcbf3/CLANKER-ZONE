@@ -7,12 +7,12 @@ Env:
 
 VRAM logger + 4-bit OCR:
 ( nvidia-smi -l 1 > ~/nvidia.log & echo  > /tmp/nvpid )
-python ~/CLANKER-ZONE-REPO/dots_ocr_run_4bit.py   --model    --image ~/test.png   --prompt "Read all visible text and return as plain text."   --max-new 256 | tee ~/ocr_out.txt
+python ~/CLANKER-ZONE-REPO/dots_ocr_run_4bit.py --sample   --model    --image ~/test.png   --prompt "Read all visible text and return as plain text."   --max-new 256 --min-new 32 | tee ~/ocr_out.txt
 kill  2>/dev/null || true
 tail -n 20 ~/nvidia.log
 
 FP/BF16 reference (no prompt echo):
-python ~/CLANKER-ZONE-REPO/dots_ocr_run.py   --model    --image ~/test.png   --prompt "Read all visible text and return as plain text."   --max-new 256
+python ~/CLANKER-ZONE-REPO/dots_ocr_run.py   --model    --image ~/test.png   --prompt "Read all visible text and return as plain text."   --max-new 256 --min-new 32
 
 Notes:
 - 4-bit runner avoids flash_attn; sets attn_implementation=sdpa.
@@ -23,3 +23,8 @@ Notes:
   spatial_merge_size so the model consumes pixels instead of echoing prompts.
 
 Observed VRAM on RTX 4060 8GB: ~4-7 GB depending on image size and max_new.
+
+Flags:
+- --sample to enable sampling; greedy otherwise.
+- --min-new to set minimum new tokens (default 32).
+- --no-clean to disable post-processing.

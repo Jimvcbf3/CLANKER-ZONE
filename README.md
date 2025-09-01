@@ -30,3 +30,10 @@ Notes
 - Image-token expansion: the single <|imgpad|> placeholder is expanded to the exact number of visual tokens computed from image_grid_thw and spatial_merge_size.
 - Anti-loop params: do_sample=True, temperature=0.6, top_p=0.9, repetition_penalty=1.15, min_new_tokens=1.
 - Observed VRAM (RTX 4060 8GB): typically ~4–7 GB depending on image size and max_new.
+
+
+Flags for dots_ocr_run_4bit.py:
+- --sample: enable sampling (default greedy).
+- --min-new: minimum new tokens (default 32).
+- --no-clean: disable post-processing (default cleaning on).
+- --debug: print expansion + tokenization dbg before final OCR.
