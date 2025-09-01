@@ -1,0 +1,20 @@
+WSL2 tested commands for dots.ocr (Windows-friendly, RTX 4060 8GB)
+
+Env:
+- venv: source ~/venvs/dots/bin/activate
+- local model: export MODEL_DIR=/root/models/dots-ocr-4bit
+- copy test image: cp /mnt/c/ai-auto/test.png ~/test.png
+
+VRAM logger + 4-bit OCR:
+( nvidia-smi -l 1 > ~/nvidia.log & echo  > /tmp/nvpid )
+python ~/CLANKER-ZONE-REPO/dots_ocr_run_4bit.py   --model    --image ~/test.png   --prompt "Read all visible text and return as plain text."   --max-new 256 | tee ~/ocr_out.txt
+kill  2>/dev/null || true
+tail -n 20 ~/nvidia.log
+
+FP/BF16 reference (no prompt echo):
+python ~/CLANKER-ZONE-REPO/dots_ocr_run.py   --model    --image ~/test.png   --prompt "Read all visible text and return as plain text."   --max-new 256
+
+Notes:
+- 4-bit runner avoids flash_attn; sets attn_implementation=sdpa.
+- Anti-loop params enabled: do_sample=True, temperature=0.6, top_p=0.9, repetition_penalty=1.15.
+- Images auto downscale to ~800k pixels (~1k visual tokens) to fit in 8GB VRAM.

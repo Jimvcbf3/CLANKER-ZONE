@@ -1,82 +1,157 @@
-# C:\ai-auto\dots_ocr_run_4bit.py
-# Run the 4-bit dots.ocr using the official chat/processor path (no flash-attn required on Windows).
-# Usage:
-#   py -u C:\ai-auto\dots_ocr_run_4bit.py --image C:\ai-auto\test.png --prompt "Read all visible text and return as plain text." --max-new 256
-
-import os, argparse
+#!/usr/bin/env python
+import argparse
+import os
 from PIL import Image
 import torch
-from transformers import AutoModelForCausalLM, AutoProcessor
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Qwen2VLImageProcessor
 
-# Use the tiny helper we just created (no repo install needed)
-from qwen_vl_utils import process_vision_info
 
-MODEL_ID = "helizac/dots.ocr-4bit"
+def load_image(path):
+    img = Image.open(path).convert("RGB")
+    return img
 
-def parse_args():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--image", required=True)
-    ap.add_argument("--prompt", required=True)
-    ap.add_argument("--max-new", type=int, default=256, dest="max_new")
-    ap.add_argument("--device", choices=["auto","cuda","cpu"], default="auto")
-    return ap.parse_args()
+
+def downscale_to_max_pixels(img: Image.Image, max_pixels: int = 800_000) -> Image.Image:
+    # Maintain aspect ratio, reduce area to <= max_pixels
+    w, h = img.size
+    area = w * h
+    if area <= max_pixels:
+        return img
+    scale = (max_pixels / float(area)) ** 0.5
+    new_w = max(1, int(w * scale))
+    new_h = max(1, int(h * scale))
+    return img.resize((new_w, new_h), Image.BICUBIC)
+
+
+def build_messages(prompt: str, pil_image: Image.Image):
+    return [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "image": pil_image},
+                {"type": "text", "text": prompt},
+            ],
+        }
+    ]
+
 
 def main():
-    args = parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, required=True, help="Path to local 4-bit model dir")
+    parser.add_argument("--image", type=str, required=True)
+    parser.add_argument("--prompt", type=str, required=True)
+    parser.add_argument("--max-new", type=int, default=256, dest="max_new_tokens")
+    parser.add_argument("--temperature", type=float, default=0.6)
+    parser.add_argument("--top-p", type=float, default=0.9, dest="top_p")
+    parser.add_argument("--rp", type=float, default=1.15, dest="repetition_penalty")
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
 
-    # Pick device/dtype
-    use_cuda = torch.cuda.is_available() and args.device != "cpu"
-    device_map = "auto" if (args.device == "auto" and use_cuda) else None
-    torch_dtype = torch.bfloat16 if use_cuda else torch.float32
+    torch.backends.cuda.matmul.allow_tf32 = True
 
-    print(f"[load] model={MODEL_ID} dtype={torch_dtype} device_map={device_map or args.device}")
+    quant_cfg = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_quant_type="nf4",
+    )
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID,
+        args.model,
         trust_remote_code=True,
-        torch_dtype=torch_dtype,
-        device_map=device_map,
+        quantization_config=quant_cfg,
+        device_map={"": 0} if device.type == "cuda" else None,
+        torch_dtype=torch.bfloat16 if device.type == "cuda" else torch.float32,
+        attn_implementation="sdpa",
     )
-    processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True, use_fast=True)
+    model.eval()
 
-    image_path = os.path.abspath(args.image)
-    if not os.path.isfile(image_path):
-        raise SystemExit(f"[ERR] image not found: {image_path}")
+        # Load and downscale image to keep visual tokens reasonable for 8GB VRAM
+    pil = load_image(args.image)
+    pil = downscale_to_max_pixels(pil, max_pixels=800_000)
 
-    # Build the chat messages the way the model expects
-    messages = [{
-        "role": "user",
-        "content": [
-            {"type": "image", "image": image_path},
-            {"type": "text",  "text":  args.prompt},
-        ],
-    }]
+    messages = build_messages(args.prompt, pil)
 
-    # Chat template + image tensors
-    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    image_inputs, _ = process_vision_info(messages)
-    inputs = processor(text=[text], images=image_inputs, padding=True, return_tensors="pt")
+    # Tokenizer and image processor separately (avoid DotsVLProcessor video dependency)
+    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+    image_processor = Qwen2VLImageProcessor.from_pretrained(args.model)
 
-    # Move tensors to the model device
-    inputs = {k: (v.to(model.device) if hasattr(v, "to") else v) for k, v in inputs.items()}
+    # Build chat text with template
+    text = "<|user|><|img|><|imgpad|><|endofimg|>" + args.prompt + "<|endofuser|><|assistant|>"
+    tokenized = tokenizer(text, return_tensors="pt")
 
-    print("[gen ] generating…")
-    gen_ids = model.generate(
-        **inputs,
-        max_new_tokens=args.max_new,
-        # Quantized models benefit from anti-loop settings:
+    # Compute image features for model
+    vision = image_processor(images=[pil], return_tensors="pt")
+
+    # Expand image token to match number of vision tokens so img_mask aligns
+    image_token_id = getattr(model.config, 'image_token_id', None)
+    if image_token_id is None:
+        # Fallback: resolve from tokenizer special tokens
+        image_token_id = tokenizer.convert_tokens_to_ids('<|imgpad|>')
+    input_ids = tokenized['input_ids']
+    attn = tokenized.get('attention_mask', None)
+    # vision token length after spatial merge
+    grid = vision['image_grid_thw'][0]
+    t, gh, gw = int(grid[0]), int(grid[1]), int(grid[2])
+    merge = getattr(model.config.vision_config, 'spatial_merge_size', 2)
+    vision_len = int(t * (gh * gw) // (merge * merge))
+    # find the first occurrence of image token id
+    where = (input_ids == image_token_id).nonzero()
+    if where.numel() == 0:
+        raise RuntimeError('Image token id not found in input_ids; check chat template')
+    b, pos = int(where[0,0]), int(where[0,1])
+    before = input_ids[:, :pos]
+    after = input_ids[:, pos+1:]
+    repeat = torch.full((1, vision_len), image_token_id, dtype=before.dtype)
+    new_input_ids = torch.cat([before, repeat, after], dim=1)
+    if attn is not None:
+        attn_before = attn[:, :pos]
+        attn_after = attn[:, pos+1:]
+        attn_repeat = torch.ones((1, vision_len), dtype=attn.dtype)
+        new_attn = torch.cat([attn_before, attn_repeat, attn_after], dim=1)
+    else:
+        new_attn = None
+    tokenized['input_ids'] = new_input_ids
+    if new_attn is not None:
+        tokenized['attention_mask'] = new_attn
+
+    inputs = {
+        "input_ids": tokenized["input_ids"].to(device),
+        "attention_mask": tokenized.get("attention_mask", None).to(device) if tokenized.get("attention_mask", None) is not None else None,
+        "pixel_values": vision["pixel_values"].to(device),
+        "image_grid_thw": vision["image_grid_thw"].to(device),
+    }
+
+    gen_kwargs = dict(
         do_sample=True,
-        temperature=0.6,
-        top_p=0.9,
-        repetition_penalty=1.15,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        repetition_penalty=args.repetition_penalty,
+        max_new_tokens=args.max_new_tokens,
+        pad_token_id=tokenizer.eos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
     )
 
-    # Trim the echoed prompt portion
-    trimmed = [out[len(inp):] for inp, out in zip(inputs["input_ids"], gen_ids)]
-    out_text = processor.batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+    torch.manual_seed(args.seed)
 
-    print("\n===== OCR OUTPUT =====")
+    with torch.no_grad():
+        output_ids = model.generate(**inputs, **gen_kwargs)
+
+    # The first sequence contains the full prompt + new tokens; we only decode new tokens
+    # But processor.decode can handle; simplest: decode all and strip prompt text prefix
+    decoded = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+
+    # Heuristic to remove the user prompt from the beginning if echoed
+    # Keep only after the last occurrence of the prompt string
+    out_text = decoded
+    if args.prompt in decoded:
+        idx = decoded.rfind(args.prompt)
+        out_text = decoded[idx + len(args.prompt):].strip()
+
     print(out_text.strip())
-    print("======================\n")
+
 
 if __name__ == "__main__":
     main()
