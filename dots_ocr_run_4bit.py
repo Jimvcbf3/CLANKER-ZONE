@@ -1,14 +1,12 @@
 #!/usr/bin/env python
 import argparse
-import os
 from PIL import Image
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Qwen2VLImageProcessor
-
+from ocr_cleaner import clean as _clean_ocr
 
 def load_image(path: str) -> Image.Image:
-    return Image.open(path).convert("RGB")
-
+    return Image.open(path).convert('RGB')
 
 def downscale_to_max_pixels(img: Image.Image, max_pixels: int = 800_000) -> Image.Image:
     w, h = img.size
@@ -17,36 +15,6 @@ def downscale_to_max_pixels(img: Image.Image, max_pixels: int = 800_000) -> Imag
         return img
     scale = (max_pixels / float(area)) ** 0.5
     return img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.BICUBIC)
-
-
-def _clean_ocr(text: str) -> str:
-    import re
-    from collections import Counter
-    text = text.replace("", "")
-    lines = [re.sub(r"\s+", " ", ln).strip() for ln in text.splitlines()]
-    lines = [ln for ln in lines if ln]
-    cleaned, last, run = [], None, 0
-    for ln in lines:
-        if ln == last:
-            run += 1
-            if run <= 3:
-                cleaned.append(ln)
-        else:
-            last, run = ln, 1
-            cleaned.append(ln)
-    freq = Counter(cleaned)
-    final, short_count = [], {}
-    for ln in cleaned:
-        if len(ln.split()) == 1 and len(ln) <= 5 and freq[ln] > 6:
-            c = short_count.get(ln, 0) + 1
-            short_count[ln] = c
-            if c <= 3:
-                final.append(ln)
-            continue
-        final.append(ln)
-    return "
-".join(final)
-
 
 def main():
     ap = argparse.ArgumentParser()
@@ -62,19 +30,12 @@ def main():
 
     torch.backends.cuda.matmul.allow_tf32 = True
 
-    quant_cfg = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_quant_type='nf4',
-    )
-
+    quant_cfg = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_use_double_quant=True,
+                                   bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_type='nf4')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     model = AutoModelForCausalLM.from_pretrained(
-        args.model,
-        trust_remote_code=True,
-        quantization_config=quant_cfg,
+        args.model, trust_remote_code=True, quantization_config=quant_cfg,
         device_map={'': 0} if device.type == 'cuda' else None,
         torch_dtype=torch.bfloat16 if device.type == 'cuda' else torch.float32,
         attn_implementation='sdpa',
@@ -93,7 +54,7 @@ def main():
 
     img = downscale_to_max_pixels(load_image(args.image), max_pixels=800_000)
 
-    # Build chat string using template semantics
+    # chat string
     prompt_txt = args.prompt
     default_prompt = 'Read all visible text and return as plain text.'
     if prompt_txt.strip() == default_prompt.strip():
@@ -103,7 +64,6 @@ def main():
     toks = tokenizer(chat, return_tensors='pt')
     vision = image_processor(images=[img], return_tensors='pt')
 
-    # Expand single image token to match visual tokens after merge
     image_token_id = getattr(model.config, 'image_token_id', tokenizer.convert_tokens_to_ids('<|imgpad|>'))
     input_ids = toks['input_ids']
     attn = toks.get('attention_mask', None)
@@ -117,6 +77,7 @@ def main():
     if where.numel() == 0:
         raise RuntimeError('Image token id not found in input_ids; check chat template')
     pos = int(where[0,1])
+
     before = input_ids[:, :pos]
     after = input_ids[:, pos+1:]
     repeat = torch.full((1, vision_len), image_token_id, dtype=before.dtype)
@@ -174,7 +135,6 @@ def main():
     if not args.no_clean and text:
         text = _clean_ocr(text)
     print(text)
-
 
 if __name__ == '__main__':
     main()
