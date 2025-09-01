@@ -162,9 +162,8 @@ def main():
 
     def _clean_ocr(text: str) -> str:
         import re
-        text = text.replace("", "")
-        lines = [re.sub(r"\s+", " ", ln).strip() for ln in text.split("
-")]
+        from collections import Counter
+        lines = [re.sub(r"\s+", " ", ln).strip() for ln in text.splitlines()]
         lines = [ln for ln in lines if ln]
         cleaned = []
         last = None
@@ -178,24 +177,19 @@ def main():
                 last = ln
                 run = 1
                 cleaned.append(ln)
-        seen = set()
+        freq = Counter(cleaned)
         final = []
-        freq = {}
+        short_count = {}
         for ln in cleaned:
-            freq[ln] = freq.get(ln, 0) + 1
-        for ln in cleaned:
-            if len(ln.split()) == 1 and len(ln) <= 5 and freq.get(ln, 0) > 6:
-                count = sum(1 for x in final if x == ln)
-                if count < 3:
+            if len(ln.split()) == 1 and len(ln) <= 5 and freq[ln] > 6:
+                c = short_count.get(ln, 0) + 1
+                short_count[ln] = c
+                if c <= 3:
                     final.append(ln)
-            else:
-                if len(ln) <= 2 and ln in seen:
-                    continue
-                final.append(ln)
-                seen.add(ln)
+                continue
+            final.append(ln)
         return "
 ".join(final)
-
     # Debug: verify expansion and shapes before decoding
     image_token_id = getattr(model.config, "image_token_id", tokenizer.convert_tokens_to_ids("<|imgpad|>"))
     expanded_count = (new_input_ids == image_token_id).sum().item()
@@ -221,12 +215,10 @@ def main():
 
     new_tokens = outputs[0][input_len:] if outputs.shape[1] > input_len else outputs[0]
     text = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-    if not args.no_clean and text:
-        text = _clean_ocr(text)
     if not text:
         full = tokenizer.decode(outputs[0], skip_special_tokens=True)
         text = full.split(args.prompt, 1)[-1].strip() if args.prompt in full else full.strip()
-    if not args.no_clean:
+    if not args.no_clean and text:
         text = _clean_ocr(text)
     print(text)
 
