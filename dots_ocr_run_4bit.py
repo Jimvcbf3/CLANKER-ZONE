@@ -130,6 +130,7 @@ def main():
         top_p=args.top_p,
         repetition_penalty=args.repetition_penalty,
         max_new_tokens=args.max_new_tokens,
+        min_new_tokens=1,
         pad_token_id=tokenizer.eos_token_id,
         eos_token_id=tokenizer.eos_token_id,
     )
@@ -142,7 +143,13 @@ def main():
     # Decode only newly generated tokens to ensure output is printed and no echo
     input_len = inputs['input_ids'].shape[1]
     new_tokens = output_ids[0][input_len:]
-    out_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+    if new_tokens.numel() > 0:
+        out_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+    else:
+        decoded_full = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+        out_text = decoded_full
+        if args.prompt in decoded_full:
+            out_text = decoded_full.split(args.prompt, 1)[-1]
     print(out_text.strip())
 
 
