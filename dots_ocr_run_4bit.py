@@ -45,6 +45,7 @@ def main():
     parser.add_argument("--top-p", type=float, default=0.9, dest="top_p")
     parser.add_argument("--rp", type=float, default=1.15, dest="repetition_penalty")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--debug", action="store_true", help="Print debug info about expansion and decoding")
     args = parser.parse_args()
 
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -140,8 +141,11 @@ def main():
     # Debug: verify expansion and shapes before decoding
     image_token_id = getattr(model.config, "image_token_id", tokenizer.convert_tokens_to_ids("<|imgpad|>"))
     expanded_count = (new_input_ids == image_token_id).sum().item()
-    print(f"[dbg] expected vision_len: {vision_len}")
-    print(f"[dbg] expanded image_token_id count: {expanded_count}")
+    if args.debug:
+        print(f"[dbg] expected vision_len: {vision_len}")
+        print(f"[dbg] expanded image_token_id count: {expanded_count}")
+        if expanded_count != vision_len:
+            raise RuntimeError(f"image token expansion mismatch: expanded={expanded_count} expected={vision_len}")
 
     with torch.no_grad():
         outputs = model.generate(
@@ -157,14 +161,15 @@ def main():
         )
 
     input_len = inputs["input_ids"].shape[1]
-    print(f"[dbg] output_ids.shape: {tuple(outputs.shape)} input_len: {input_len}")
-    try:
-        prefix_dbg = tokenizer.decode(outputs[0][:input_len], skip_special_tokens=False)
-        new_dbg = tokenizer.decode(outputs[0][input_len:], skip_special_tokens=False)
-        print(prefix_dbg.strip())
-        print(new_dbg.strip())
-    except Exception:
-        pass
+    if args.debug:
+        print(f"[dbg] output_ids.shape: {tuple(outputs.shape)} input_len: {input_len}")
+        try:
+            prefix_dbg = tokenizer.decode(outputs[0][:input_len], skip_special_tokens=False)
+            new_dbg = tokenizer.decode(outputs[0][input_len:], skip_special_tokens=False)
+            print(prefix_dbg.strip())
+            print(new_dbg.strip())
+        except Exception:
+            pass
 
     new_tokens = outputs[0][input_len:] if outputs.shape[1] > input_len else outputs[0]
     text = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
