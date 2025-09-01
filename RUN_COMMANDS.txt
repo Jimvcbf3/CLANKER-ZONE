@@ -16,5 +16,8 @@ python ~/CLANKER-ZONE-REPO/dots_ocr_run.py   --model    --image ~/test.png   --p
 
 Notes:
 - 4-bit runner avoids flash_attn; sets attn_implementation=sdpa.
-- Anti-loop params enabled: do_sample=True, temperature=0.6, top_p=0.9, repetition_penalty=1.15.
-- Images auto downscale to ~800k pixels (~1k visual tokens) to fit in 8GB VRAM.
+- Anti-loop params: do_sample=True, temperature=0.6, top_p=0.9, repetition_penalty=1.15.
+- Auto downscale to ~800k pixels (~1k visual tokens) to fit in 8GB VRAM.
+- Image-token expansion: the single <|imgpad|> in input_ids is expanded to
+  the exact number of visual tokens computed from image_grid_thw and
+  spatial_merge_size so the model consumes pixels instead of echoing prompts.
