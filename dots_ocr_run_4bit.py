@@ -140,15 +140,20 @@ def main():
     with torch.no_grad():
         output_ids = model.generate(**inputs, **gen_kwargs)
 
-    # Decode only newly generated tokens to ensure output is printed and no echo
+    # Decode new tokens robustly: handle full-seq and new-only outputs
     input_len = inputs['input_ids'].shape[1]
-    new_tokens = output_ids[0][input_len:]
-    if new_tokens.numel() > 0:
-        out_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+    seq_len = output_ids.shape[1]
+    if seq_len > input_len:
+        new_tokens = output_ids[0][input_len:]
     else:
+        # Some generation configs return only new tokens
+        new_tokens = output_ids[0]
+    out_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+    if not out_text.strip():
         decoded_full = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-        out_text = decoded_full
-        if args.prompt in decoded_full:
+        if decoded_full.strip():
+            out_text = decoded_full
+        elif args.prompt in decoded_full:
             out_text = decoded_full.split(args.prompt, 1)[-1]
     print(out_text.strip())
 
