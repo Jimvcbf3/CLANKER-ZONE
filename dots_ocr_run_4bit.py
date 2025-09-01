@@ -45,6 +45,9 @@ def main():
     parser.add_argument("--top-p", type=float, default=0.9, dest="top_p")
     parser.add_argument("--rp", type=float, default=1.15, dest="repetition_penalty")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--sample", action="store_true", help="Enable sampling (default: greedy)")
+    parser.add_argument("--min-new", type=int, default=32, dest="min_new", help="min_new_tokens (default: 32)")
+    parser.add_argument("--no-clean", action="store_true", help="Disable OCR post-processing")
     parser.add_argument("--debug", action="store_true", help="Print debug info about expansion and decoding")
     args = parser.parse_args()
 
@@ -78,9 +81,23 @@ def main():
     # Tokenizer and image processor separately (avoid DotsVLProcessor video dependency)
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     image_processor = Qwen2VLImageProcessor.from_pretrained(args.model)
+    if args.debug:
+        try:
+            print('[dbg] ids:', 'eos', tokenizer.eos_token_id, 'pad', tokenizer.pad_token_id)
+            for tok in ['<|endofassistant|>', '<|endoftext|>', '<|imgpad|>']:
+                try:
+                    print(f"[dbg] id[{tok}]:", tokenizer.convert_tokens_to_ids(tok))
+                except Exception as e:
+                    print(f"[dbg] id[{tok}]: lookup-failed:", e)
+        except Exception as e:
+            print('[dbg] tokenizer id dbg failed:', e)
 
     # Build chat text with template
-    text = "<|user|><|img|><|imgpad|><|endofimg|>" + args.prompt + "<|endofuser|><|assistant|>"
+    prompt_txt = args.prompt
+    default_prompt = "Read all visible text and return as plain text."
+    if prompt_txt.strip() == default_prompt.strip():
+        prompt_txt += " Return unique visible text; skip repeating navigation labels. Preserve reading order and line breaks."
+    text = "<|user|><|img|><|imgpad|><|endofimg|>" + prompt_txt + "<|endofuser|><|assistant|>"
     tokenized = tokenizer(text, return_tensors="pt")
 
     # Compute image features for model
@@ -124,19 +141,60 @@ def main():
         "pixel_values": vision["pixel_values"].to(device),
         "image_grid_thw": vision["image_grid_thw"].to(device),
     }
-
+    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
     gen_kwargs = dict(
-        do_sample=True,
-        temperature=args.temperature,
-        top_p=args.top_p,
-        repetition_penalty=args.repetition_penalty,
         max_new_tokens=args.max_new_tokens,
-        min_new_tokens=1,
-        pad_token_id=tokenizer.eos_token_id,
+        min_new_tokens=args.min_new,
+        pad_token_id=pad_id,
         eos_token_id=tokenizer.eos_token_id,
+        no_repeat_ngram_size=4,
+        repetition_penalty=1.1,
     )
+    if args.sample:
+        gen_kwargs.update(dict(do_sample=True, temperature=args.temperature, top_p=args.top_p))
+    else:
+        gen_kwargs.update(dict(do_sample=False))
+
 
     torch.manual_seed(args.seed)
+
+
+
+    def _clean_ocr(text: str) -> str:
+        import re
+        text = text.replace("", "")
+        lines = [re.sub(r"\s+", " ", ln).strip() for ln in text.split("
+")]
+        lines = [ln for ln in lines if ln]
+        cleaned = []
+        last = None
+        run = 0
+        for ln in lines:
+            if ln == last:
+                run += 1
+                if run <= 3:
+                    cleaned.append(ln)
+            else:
+                last = ln
+                run = 1
+                cleaned.append(ln)
+        seen = set()
+        final = []
+        freq = {}
+        for ln in cleaned:
+            freq[ln] = freq.get(ln, 0) + 1
+        for ln in cleaned:
+            if len(ln.split()) == 1 and len(ln) <= 5 and freq.get(ln, 0) > 6:
+                count = sum(1 for x in final if x == ln)
+                if count < 3:
+                    final.append(ln)
+            else:
+                if len(ln) <= 2 and ln in seen:
+                    continue
+                final.append(ln)
+                seen.add(ln)
+        return "
+".join(final)
 
     # Debug: verify expansion and shapes before decoding
     image_token_id = getattr(model.config, "image_token_id", tokenizer.convert_tokens_to_ids("<|imgpad|>"))
@@ -148,17 +206,7 @@ def main():
             raise RuntimeError(f"image token expansion mismatch: expanded={expanded_count} expected={vision_len}")
 
     with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=args.max_new_tokens,
-            do_sample=True,
-            temperature=0.6,
-            top_p=0.9,
-            repetition_penalty=1.15,
-            min_new_tokens=1,
-            pad_token_id=tokenizer.eos_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-        )
+        outputs = model.generate(**inputs, **gen_kwargs)
 
     input_len = inputs["input_ids"].shape[1]
     if args.debug:
@@ -173,9 +221,13 @@ def main():
 
     new_tokens = outputs[0][input_len:] if outputs.shape[1] > input_len else outputs[0]
     text = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+    if not args.no_clean and text:
+        text = _clean_ocr(text)
     if not text:
         full = tokenizer.decode(outputs[0], skip_special_tokens=True)
         text = full.split(args.prompt, 1)[-1].strip() if args.prompt in full else full.strip()
+    if not args.no_clean:
+        text = _clean_ocr(text)
     print(text)
 
 
