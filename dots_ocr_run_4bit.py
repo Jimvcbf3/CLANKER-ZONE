@@ -122,8 +122,8 @@ def main():
     if args.debug:
         print(f"[dbg] output_ids.shape: {tuple(outputs.shape)} input_len: {input_len}")
         try:
-            print(tokenizer.decode(outputs[0][:input_len], skip_special_tokens=False).strip())
-            print(tokenizer.decode(outputs[0][input_len:], skip_special_tokens=False).strip())
+            print(tokenizer.decode(outputs[0][:input_len], skip_special_tokens=False).strip()[:300])
+            print(tokenizer.decode(outputs[0][input_len:], skip_special_tokens=False).strip()[:300])
         except Exception:
             pass
 
@@ -134,6 +134,7 @@ def main():
         text = full.split(args.prompt, 1)[-1].strip() if args.prompt in full else full.strip()
     if not args.no_clean and text:
         text = _clean_ocr(text)
+    print('=== CLEANED OCR ===')
     print(text)
 
 if __name__ == '__main__':
