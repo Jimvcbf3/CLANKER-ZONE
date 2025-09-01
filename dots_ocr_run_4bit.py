@@ -137,25 +137,41 @@ def main():
 
     torch.manual_seed(args.seed)
 
-    with torch.no_grad():
-        output_ids = model.generate(**inputs, **gen_kwargs)
+    # Debug: verify expansion and shapes before decoding
+    image_token_id = getattr(model.config, "image_token_id", tokenizer.convert_tokens_to_ids("<|imgpad|>"))
+    expanded_count = (new_input_ids == image_token_id).sum().item()
+    print(f"[dbg] expected vision_len: {vision_len}")
+    print(f"[dbg] expanded image_token_id count: {expanded_count}")
 
-    # Decode new tokens robustly: handle full-seq and new-only outputs
-    input_len = inputs['input_ids'].shape[1]
-    seq_len = output_ids.shape[1]
-    if seq_len > input_len:
-        new_tokens = output_ids[0][input_len:]
-    else:
-        # Some generation configs return only new tokens
-        new_tokens = output_ids[0]
-    out_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
-    if not out_text.strip():
-        decoded_full = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-        if decoded_full.strip():
-            out_text = decoded_full
-        elif args.prompt in decoded_full:
-            out_text = decoded_full.split(args.prompt, 1)[-1]
-    print(out_text.strip())
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=args.max_new_tokens,
+            do_sample=True,
+            temperature=0.6,
+            top_p=0.9,
+            repetition_penalty=1.15,
+            min_new_tokens=1,
+            pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+        )
+
+    input_len = inputs["input_ids"].shape[1]
+    print(f"[dbg] output_ids.shape: {tuple(outputs.shape)} input_len: {input_len}")
+    try:
+        prefix_dbg = tokenizer.decode(outputs[0][:input_len], skip_special_tokens=False)
+        new_dbg = tokenizer.decode(outputs[0][input_len:], skip_special_tokens=False)
+        print(prefix_dbg.strip())
+        print(new_dbg.strip())
+    except Exception:
+        pass
+
+    new_tokens = outputs[0][input_len:] if outputs.shape[1] > input_len else outputs[0]
+    text = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+    if not text:
+        full = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        text = full.split(args.prompt, 1)[-1].strip() if args.prompt in full else full.strip()
+    print(text)
 
 
 if __name__ == "__main__":
