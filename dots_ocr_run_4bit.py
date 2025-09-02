@@ -52,7 +52,7 @@ def main():
         except Exception as e:
             print('[dbg] tokenizer id dbg failed:', e)
 
-    img = downscale_to_max_pixels(load_image(args.image), max_pixels=800_000)
+    img = load_image(args.image)
 
     # chat string
     prompt_txt = args.prompt
