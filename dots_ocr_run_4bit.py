@@ -26,6 +26,7 @@ def main():
     ap.add_argument('--sample', action='store_true')
     ap.add_argument('--no-clean', action='store_true')
     ap.add_argument('--debug', action='store_true')
+    ap.add_argument('--beams', type=int, default=1)
     args = ap.parse_args()
 
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -112,6 +113,8 @@ def main():
         repetition_penalty=1.1,
         do_sample=False,
     )
+    if args.beams and args.beams > 1:
+        gen_kwargs.update(dict(num_beams=args.beams, early_stopping=True, num_return_sequences=1))
     if args.sample:
         gen_kwargs.update(dict(do_sample=True, temperature=0.6, top_p=0.9))
 
