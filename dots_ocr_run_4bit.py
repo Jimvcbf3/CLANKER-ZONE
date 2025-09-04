@@ -88,6 +88,7 @@ def main():
     ap.add_argument('--no-repeat-ngram-size', type=int, default=4, dest='no_repeat_ngram_size')
     ap.add_argument('--repetition-penalty', type=float, default=1.1, dest='repetition_penalty')
     ap.add_argument('--top-k', type=int, default=50)
+    ap.add_argument('--top-p', type=float, default=0.9)
     ap.add_argument('--temperature', type=float, default=0.6)
     args = ap.parse_args()
 
@@ -184,7 +185,7 @@ def main():
         if beams and beams > 1:
             gen_kwargs.update(dict(num_beams=beams, early_stopping=True, num_return_sequences=1))
         if sample:
-            gen_kwargs.update(dict(do_sample=True, temperature=float(args.temperature), top_p=0.9, top_k=int(args.top_k)))
+            gen_kwargs.update(dict(do_sample=True, temperature=float(args.temperature), top_p=float(args.top_p), top_k=int(args.top_k)))
 
         with torch.no_grad():
             outputs = model.generate(**inputs, **gen_kwargs)
@@ -297,7 +298,7 @@ def main():
                 print(f"=== TILE {i} DEBUG ===")
                 print(dbg_lines[-1])
                 if mode.startswith('sample'):
-                    print(f"sampling: temperature={args.temperature} top_p=0.9 top_k={args.top_k}")
+                    print(f"sampling: temperature={args.temperature} top_p={args.top_p} top_k={args.top_k}")
                 print(f"=== TILE {i} CLEANED ===")
                 tlines = (chosen['clean'] or '').splitlines()
                 print('\n'.join(tlines[:60]))
