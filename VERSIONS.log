@@ -2,4 +2,4 @@ torch=2.6.0+cu124
 transformers=4.55.2
 bitsandbytes=0.45.2
 tokenizer=Qwen2TokenizerFast
-processor=Qwen2TokenizerFast
+processor=DotsVLProcessor

@@ -1,17 +1,28 @@
 {
   "processor_id": "/root/models/dots-ocr-4bit",
-  "processor_class": "Qwen2TokenizerFast",
+  "processor_class": "DotsVLProcessor",
   "resize_policy": {
-    "size": null,
-    "resample": "None",
-    "do_resize": null,
+    "size": {
+      "shortest_edge": 3136,
+      "longest_edge": 11289600
+    },
+    "resample": "3",
+    "do_resize": true,
     "do_pad": null,
     "pad_size": null
   },
   "norm": {
-    "image_mean": null,
-    "image_std": null,
-    "do_normalize": null
+    "image_mean": [
+      0.48145466,
+      0.4578275,
+      0.40821073
+    ],
+    "image_std": [
+      0.26862954,
+      0.26130258,
+      0.27577711
+    ],
+    "do_normalize": true
   },
   "chat_template": "{%- for m in messages %}\n    {%- if m.role == 'system' %}\n        {{- '<|system|>' + m.content + '<|endofsystem|>\\n' }}\n    {%- elif m.role == 'user' %}\n        {{- '<|user|>' + m.content + '<|endofuser|>' }}\n    {%- elif m.role == 'assistant' %}\n        {{- '<|assistant|>' + m.content }}\n        {%- if not loop.last %}\n            {{- '<|endofassistant|>' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if messages[-1].role != 'assistant' %}\n    {{- '<|assistant|>' }}\n{%- endif %}",
   "decoding_defaults": {

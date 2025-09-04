@@ -324,10 +324,15 @@ def main():
         if not raw_text:
             full = tokenizer.decode(outputs[0], skip_special_tokens=True)
             raw_text = full.split(prompt, 1)[-1].strip() if prompt in full else full.strip()
-        # Pre-clean UI text, then default cleaner for per-tile display
-        pre_text, dropped = _preclean_ui(raw_text)
-        score = _ui_char_count(pre_text) - 2 * int(dropped)
-        cleaned = _clean_ocr(pre_text) if (not args.no_clean and pre_text) else pre_text
+        # Pre-clean UI text (baseline mode); hf-demo preset defers to upstream-style filters later
+        if args.preset == 'hf-demo':
+            pre_text, dropped = raw_text, 0
+            score = _ui_char_count(pre_text)
+            cleaned = pre_text
+        else:
+            pre_text, dropped = _preclean_ui(raw_text)
+            score = _ui_char_count(pre_text) - 2 * int(dropped)
+            cleaned = _clean_ocr(pre_text) if (not args.no_clean and pre_text) else pre_text
 
         dbg = {
             'image_hw': (tile_img.size[1], tile_img.size[0]),
@@ -385,20 +390,32 @@ def main():
         tiles = _tile_image(img, tw, th, overlap)
         chosen_list = []
         for i, timg in enumerate(tiles, start=1):
-            # Primary: beams=3 (min_new>=128)
-            primary = run_single(timg, args.prompt, beams=3, sample=False, min_new_override=max(128, args.min_new))
+            # Primary decode policy
+            if args.preset == 'hf-demo' and args.sample:
+                primary = run_single(
+                    timg, args.prompt,
+                    beams=1, sample=True,
+                    min_new_override=max(128, args.min_new)
+                )
+                mode = 'sample'
+            elif args.beams and int(args.beams) > 1:
+                primary = run_single(timg, args.prompt, beams=int(args.beams), sample=False, min_new_override=max(128, args.min_new))
+                mode = f'beams({int(args.beams)})'
+            else:
+                # default greedy
+                primary = run_single(timg, args.prompt, beams=1, sample=False, min_new_override=max(128, args.min_new))
+                mode = 'greedy'
             chosen = primary
-            mode = 'beams(3)'
 
             # Score-based fallback trigger
-            if primary['score'] < 10:
+            if args.preset != 'hf-demo' and primary['score'] < 10:
                 fallback = run_single(timg, args.prompt, beams=1, sample=True, min_new_override=max(128, args.min_new))
                 chosen = fallback if fallback['score'] > primary['score'] else primary
                 mode = 'sample' if chosen is fallback else mode
 
                 # second-stage: still sparse? try narrower 800px center crop with sampling
                 # Further narrow if still weak score
-                if chosen['score'] < 10 and timg.size[0] > 800:
+                if args.preset != 'hf-demo' and chosen['score'] < 10 and timg.size[0] > 800:
                     w, h = timg.size
                     new_w = 800
                     left = max(0, (w - new_w)//2)
@@ -426,7 +443,7 @@ def main():
 
             chosen_list.append(chosen)
             results.append(chosen['clean'])
-        # Seam-aware merge on RAW outputs (dedup before cleaner), then apply preset post-filters, then cleaner
+        # Upstream post-filters → seam dedup → cleaner (hf-demo)
         if len(chosen_list) >= 2:
             a_raw = chosen_list[0]['raw'] or ''
             b_raw = chosen_list[1]['raw'] or ''
@@ -474,17 +491,20 @@ def main():
                             keep_b[jb] = False
                 merged = a_lines + [b_lines[i] for i in range(len(b_lines)) if keep_b[i]]
                 return "\n".join(merged)
-            merged_raw = _seam_merge(a_raw, b_raw)
-            # Optional preset post-filters
+            # Optional preset post-filters (per-tile), then seam merge
             def _hf_post_filters(s: str) -> str:
                 try:
                     lines = []
                     url = re.compile(r"https?://\S+|www\.[^\s]+", re.I)
+                    host = re.compile(r"\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b", re.I)
                     dims = re.compile(r"\b\d{2,4}x\d{2,4}\b", re.I)
                     bad = re.compile(r"\b(?:bbox|box|category)\b", re.I)
                     allowed = re.compile(r"[A-Za-z\d\u4e00-\u9fff]")
+                    punct_only = re.compile(r"^\s*[\[\]\(\):;.,\-\+\|\!~/\\_=:<>]+(\s*[\[\]\(\):;.,\-\+\|\!~/\\_=:<>]+)*\s*$")
                     for ln in (s or '').splitlines():
-                        if url.search(ln) or dims.search(ln) or bad.search(ln):
+                        if url.search(ln) or host.search(ln) or dims.search(ln) or bad.search(ln):
+                            continue
+                        if punct_only.match(ln):
                             continue
                         if not allowed.search(ln):
                             continue
@@ -493,7 +513,9 @@ def main():
                 except Exception:
                     return s
             if args.preset == 'hf-demo':
-                merged_raw = _hf_post_filters(merged_raw)
+                a_raw = _hf_post_filters(a_raw)
+                b_raw = _hf_post_filters(b_raw)
+            merged_raw = _seam_merge(a_raw, b_raw)
             final_text = _clean_ocr(merged_raw)
         else:
             final_text = "\n".join(results)
