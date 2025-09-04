@@ -71,7 +71,7 @@ def _tile_image(img: Image.Image, tile_w: int, tile_h: int, overlap: int = 0) ->
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--model', required=True)
+    ap.add_argument('--model', required=False)
     ap.add_argument('--image', required=True)
     ap.add_argument('--prompt', required=True)
     ap.add_argument('--max-new', type=int, default=256, dest='max_new')
@@ -148,34 +148,56 @@ def main():
                                    bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_type='nf4')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Resolve model/processor id
-    model_id = args.hf_model_id if args.hf_model_id else args.model
+    # Resolve model/processor ids with robust fallbacks
+    def _try_load_model(mid: str):
+        if args.full_precision:
+            return AutoModelForCausalLM.from_pretrained(
+                mid, trust_remote_code=True,
+                device_map={'': 0} if device.type == 'cuda' else None,
+                torch_dtype=torch.bfloat16 if device.type == 'cuda' else torch.float32,
+                attn_implementation='sdpa',
+            ).eval()
+        else:
+            return AutoModelForCausalLM.from_pretrained(
+                mid, trust_remote_code=True, quantization_config=quant_cfg,
+                device_map={'': 0} if device.type == 'cuda' else None,
+                torch_dtype=torch.bfloat16 if device.type == 'cuda' else torch.float32,
+                attn_implementation='sdpa',
+            ).eval()
 
-    # Load processor if preset else fallback to Qwen2VL
-    processor = None
-    if args.preset == 'hf-demo':
+    def _try_load_processor(pid: str):
         try:
-            processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+            return AutoProcessor.from_pretrained(pid, trust_remote_code=True)
         except Exception:
-            processor = None
+            return None
 
-    # Load model (4-bit unless full-precision explicitly requested)
-    if args.full_precision:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id, trust_remote_code=True,
-            device_map={'': 0} if device.type == 'cuda' else None,
-            torch_dtype=torch.bfloat16 if device.type == 'cuda' else torch.float32,
-            attn_implementation='sdpa',
-        ).eval()
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id, trust_remote_code=True, quantization_config=quant_cfg,
-            device_map={'': 0} if device.type == 'cuda' else None,
-            torch_dtype=torch.bfloat16 if device.type == 'cuda' else torch.float32,
-            attn_implementation='sdpa',
-        ).eval()
+    # Candidate order: explicit hf id, explicit model path/id, local known fallback
+    candidates = []
+    if args.hf_model_id:
+        candidates.append(args.hf_model_id)
+    if args.model:
+        candidates.append(args.model)
+    # local fallback
+    candidates.append('/root/models/dots-ocr-4bit')
+    load_error = None
+    model = None
+    model_id = None
+    for mid in candidates:
+        try:
+            model = _try_load_model(mid)
+            model_id = mid
+            break
+        except Exception as e:
+            load_error = e
+            continue
+    if model is None:
+        raise RuntimeError(f"Failed to load model from candidates {candidates}: {load_error}")
 
+    # Tokenizer and image processor
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    processor = None
+    if args.preset == 'hf-demo' and args.hf_model_id:
+        processor = _try_load_processor(args.hf_model_id)
     if processor is not None and hasattr(processor, 'image_processor'):
         image_processor = processor.image_processor
     else:
