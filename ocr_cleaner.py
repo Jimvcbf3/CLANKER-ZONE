@@ -104,3 +104,7 @@ class OcrCleaner:
 def clean_text(text: Optional[str]) -> str:
     return OcrCleaner().clean(text or "")
 
+
+def clean(text: Optional[str]) -> str:
+    return OcrCleaner().clean(text or "")
+
