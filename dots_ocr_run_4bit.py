@@ -88,6 +88,7 @@ def main():
     ap.add_argument('--no-repeat-ngram-size', type=int, default=4, dest='no_repeat_ngram_size')
     ap.add_argument('--repetition-penalty', type=float, default=1.1, dest='repetition_penalty')
     ap.add_argument('--top-k', type=int, default=50)
+    ap.add_argument('--temperature', type=float, default=0.6)
     args = ap.parse_args()
 
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -183,7 +184,7 @@ def main():
         if beams and beams > 1:
             gen_kwargs.update(dict(num_beams=beams, early_stopping=True, num_return_sequences=1))
         if sample:
-            gen_kwargs.update(dict(do_sample=True, temperature=0.6, top_p=0.9, top_k=int(args.top_k)))
+            gen_kwargs.update(dict(do_sample=True, temperature=float(args.temperature), top_p=0.9, top_k=int(args.top_k)))
 
         with torch.no_grad():
             outputs = model.generate(**inputs, **gen_kwargs)
@@ -252,11 +253,16 @@ def main():
         tiles = _tile_image(img, tw, th, overlap)
         chosen_list = []
         for i, timg in enumerate(tiles, start=1):
-            # primary run: beams=3, min_new=128
-            primary = run_single(timg, args.prompt, beams=3, sample=False, min_new_override=max(128, args.min_new))
+            # primary run: if --sample, prefer sampling; else beams=3. Always min_new>=128
+            if args.sample:
+                primary = run_single(timg, args.prompt, beams=1, sample=True, min_new_override=max(128, args.min_new))
+                primary_mode = 'sample'
+            else:
+                primary = run_single(timg, args.prompt, beams=3, sample=False, min_new_override=max(128, args.min_new))
+                primary_mode = 'beams(3)'
             pm = metrics(primary['clean'])
             chosen = primary
-            mode = 'beams(3)'
+            mode = primary_mode
 
             need_fb = pm['sparse']
             fallback = None
@@ -290,6 +296,8 @@ def main():
             if args.debug:
                 print(f"=== TILE {i} DEBUG ===")
                 print(dbg_lines[-1])
+                if mode.startswith('sample'):
+                    print(f"sampling: temperature={args.temperature} top_p=0.9 top_k={args.top_k}")
                 print(f"=== TILE {i} CLEANED ===")
                 tlines = (chosen['clean'] or '').splitlines()
                 print('\n'.join(tlines[:60]))
