@@ -42,11 +42,13 @@ def _tile_image(img: Image.Image, tile_w: int, tile_h: int, overlap: int = 0) ->
     if tile_w >= w and tile_h >= h:
         return [img]
     tiles: List[Image.Image] = []
-    # Special-case: enforce exactly 2 vertical tiles if height fits in one tile
+    # Special-case: enforce exact 2-column layout with true overlap O when height fits in one tile.
+    # tile_w is recomputed from (W + O) // 2, and starts=[0, W - tile_w] for a true O seam.
     if tile_h >= h and tile_w < w and tile_w * 2 >= w:
-        starts = [0, max(0, w - tile_w)]
+        exact_tw = max(1, (w + max(0, overlap)) // 2)
+        starts = [0, max(0, w - exact_tw)]
         for x in starts:
-            x2 = min(w, x + tile_w)
+            x2 = min(w, x + exact_tw)
             tiles.append(img.crop((x, 0, x2, h)))
         return tiles
 
@@ -248,6 +250,7 @@ def main():
 
     if do_tile and (tw > 0 and th > 0):
         tiles = _tile_image(img, tw, th, overlap)
+        chosen_list = []
         for i, timg in enumerate(tiles, start=1):
             # primary run: beams=3, min_new=128
             primary = run_single(timg, args.prompt, beams=3, sample=False, min_new_override=max(128, args.min_new))
@@ -291,8 +294,60 @@ def main():
                 tlines = (chosen['clean'] or '').splitlines()
                 print('\n'.join(tlines[:60]))
 
+            chosen_list.append(chosen)
             results.append(chosen['clean'])
-        final_text = "\n".join(results)
+        # Seam-aware merge on RAW outputs (dedup before cleaner), then run cleaner afterwards
+        if len(chosen_list) >= 2:
+            a_raw = chosen_list[0]['raw'] or ''
+            b_raw = chosen_list[1]['raw'] or ''
+            def _seam_merge(a: str, b: str) -> str:
+                a_lines = [ln.rstrip() for ln in a.splitlines()]
+                b_lines = [ln.rstrip() for ln in b.splitlines()]
+                k = 8
+                ai = max(0, len(a_lines) - k)
+                bi = min(len(b_lines), k)
+                # mark keep flags for b head lines
+                keep_b = [True]*len(b_lines)
+                # compare cross seam lines
+                def _sim(x: str, y: str) -> float:
+                    sx = set(x.lower().split())
+                    sy = set(y.lower().split())
+                    if sx or sy:
+                        j = len(sx & sy) / max(1, len(sx | sy))
+                    else:
+                        j = 0.0
+                    import difflib
+                    r = difflib.SequenceMatcher(None, x.lower(), y.lower()).ratio()
+                    return max(j, r)
+                # near-dup drop shorter one (prefer dropping b side)
+                for ia in range(ai, len(a_lines)):
+                    xa = a_lines[ia].strip()
+                    if not xa:
+                        continue
+                    for jb in range(0, bi):
+                        yb = b_lines[jb].strip() if jb < len(b_lines) else ''
+                        if not yb or not keep_b[jb]:
+                            continue
+                        s = _sim(xa, yb)
+                        if s >= 0.85:
+                            if len(yb) <= len(xa):
+                                keep_b[jb] = False
+                # drop very short b lines contained in longer neighbors across seam
+                for jb in range(0, bi):
+                    if not keep_b[jb]:
+                        continue
+                    yb = b_lines[jb].strip()
+                    if 0 < len(yb) <= 5:
+                        # contained in any a tail line?
+                        found = any(yb and (yb.lower() in (ln.lower())) for ln in a_lines[ai:])
+                        if found:
+                            keep_b[jb] = False
+                merged = a_lines + [b_lines[i] for i in range(len(b_lines)) if keep_b[i]]
+                return "\n".join(merged)
+            merged_raw = _seam_merge(a_raw, b_raw)
+            final_text = _clean_ocr(merged_raw)
+        else:
+            final_text = "\n".join(results)
     else:
         # Original single-image path
         single = run_single(img, args.prompt, beams=max(1, int(args.beams)), sample=bool(args.sample))
