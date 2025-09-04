@@ -4,7 +4,7 @@ from typing import List, Tuple
 import re
 from PIL import Image
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Qwen2VLImageProcessor
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Qwen2VLImageProcessor, AutoProcessor
 from ocr_cleaner import clean as _clean_ocr
 from ocr_cleaner import preclean_ui as _preclean_ui
 
@@ -81,6 +81,9 @@ def main():
     ap.add_argument('--debug', action='store_true')
     ap.add_argument('--max-pixels', type=int, default=None)
     ap.add_argument('--beams', type=int, default=1)
+    ap.add_argument('--preset', type=str, choices=['hf-demo'], default=None)
+    ap.add_argument('--hf-model-id', type=str, default=None)
+    ap.add_argument('--full-precision', action='store_true')
     # tiling + decoding knobs
     ap.add_argument('--tile', action='store_true')
     ap.add_argument('--tile-size', type=str, default='0')
@@ -95,19 +98,104 @@ def main():
 
     torch.backends.cuda.matmul.allow_tf32 = True
 
+    # Optional: fingerprint upstream processor/model into hf_fingerprint.json when using --preset hf-demo
+    def _write_hf_fingerprint(proc, mdl, mid: str):
+        try:
+            import json
+            fp = {
+                "processor_id": mid,
+                "processor_class": (proc.__class__.__name__ if proc else None),
+                "resize_policy": {},
+                "norm": {},
+                "chat_template": getattr(tokenizer, 'chat_template', None),
+                "decoding_defaults": {},
+                "post_filters": {
+                    "regex": [r"https?://\\S+|www\\.[^\\s]+", r"\\b\\d{2,4}x\\d{2,4}\\b", r"\\b(?:bbox|box|category)\\b"],
+                    "charset": "ASCII + CJK",
+                },
+            }
+            ip = getattr(proc, 'image_processor', None)
+            if ip is None:
+                ip = proc
+            if ip is not None:
+                fp["resize_policy"] = {
+                    "size": getattr(ip, 'size', None),
+                    "resample": str(getattr(ip, 'resample', None)),
+                    "do_resize": getattr(ip, 'do_resize', None),
+                    "do_pad": getattr(ip, 'do_pad', None),
+                    "pad_size": getattr(ip, 'pad_size', None),
+                }
+                fp["norm"] = {
+                    "image_mean": getattr(ip, 'image_mean', None),
+                    "image_std": getattr(ip, 'image_std', None),
+                    "do_normalize": getattr(ip, 'do_normalize', None),
+                }
+            gc = getattr(mdl, 'generation_config', None)
+            if gc is not None:
+                fp["decoding_defaults"] = {
+                    k: getattr(gc, k)
+                    for k in [
+                        'do_sample','num_beams','max_new_tokens','min_new_tokens','repetition_penalty',
+                        'no_repeat_ngram_size','temperature','top_p','top_k','length_penalty']
+                    if hasattr(gc, k)
+                }
+            with open('hf_fingerprint.json','w',encoding='utf-8') as f:
+                json.dump(fp, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
     quant_cfg = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_use_double_quant=True,
                                    bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_type='nf4')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model, trust_remote_code=True, quantization_config=quant_cfg,
-        device_map={'': 0} if device.type == 'cuda' else None,
-        torch_dtype=torch.bfloat16 if device.type == 'cuda' else torch.float32,
-        attn_implementation='sdpa',
-    ).eval()
+    # Resolve model/processor id
+    model_id = args.hf_model_id if args.hf_model_id else args.model
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
-    image_processor = Qwen2VLImageProcessor.from_pretrained(args.model)
+    # Load processor if preset else fallback to Qwen2VL
+    processor = None
+    if args.preset == 'hf-demo':
+        try:
+            processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+        except Exception:
+            processor = None
+
+    # Load model (4-bit unless full-precision explicitly requested)
+    if args.full_precision:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id, trust_remote_code=True,
+            device_map={'': 0} if device.type == 'cuda' else None,
+            torch_dtype=torch.bfloat16 if device.type == 'cuda' else torch.float32,
+            attn_implementation='sdpa',
+        ).eval()
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id, trust_remote_code=True, quantization_config=quant_cfg,
+            device_map={'': 0} if device.type == 'cuda' else None,
+            torch_dtype=torch.bfloat16 if device.type == 'cuda' else torch.float32,
+            attn_implementation='sdpa',
+        ).eval()
+
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    if processor is not None and hasattr(processor, 'image_processor'):
+        image_processor = processor.image_processor
+    else:
+        image_processor = Qwen2VLImageProcessor.from_pretrained(model_id)
+
+    # Write versions log
+    try:
+        import transformers, bitsandbytes as bnb
+        with open('VERSIONS.log','w',encoding='utf-8') as vf:
+            vf.write(f"torch={torch.__version__}\n")
+            vf.write(f"transformers={transformers.__version__}\n")
+            vf.write(f"bitsandbytes={getattr(bnb,'__version__','unknown')}\n")
+            vf.write(f"tokenizer={tokenizer.__class__.__name__}\n")
+            vf.write(f"processor={(processor.__class__.__name__ if processor is not None else 'None')}\n")
+    except Exception:
+        pass
+
+    # Write fingerprint when hf-demo preset
+    if args.preset == 'hf-demo':
+        _write_hf_fingerprint(processor if processor is not None else image_processor, model, model_id)
 
     # Print tokenizer ids when --debug
     if args.debug:
@@ -143,7 +231,11 @@ def main():
         chat = '<|user|><|img|><|imgpad|><|endofimg|>' + prompt_txt + '<|endofuser|><|assistant|>'
 
         toks = tokenizer(chat, return_tensors='pt')
-        vision = image_processor(images=[tile_img], return_tensors='pt')
+        # Use upstream processor/resizer when available (hf-demo)
+        if processor is not None:
+            vision = processor(images=[tile_img], return_tensors='pt')
+        else:
+            vision = image_processor(images=[tile_img], return_tensors='pt')
 
         image_token_id = getattr(model.config, 'image_token_id', tokenizer.convert_tokens_to_ids('<|imgpad|>'))
         input_ids = toks['input_ids']
@@ -195,8 +287,17 @@ def main():
         if sample:
             gen_kwargs.update(dict(do_sample=True, temperature=float(args.temperature), top_p=float(args.top_p), top_k=int(args.top_k)))
 
+        # OOM-safe generation (fallback to sampling if beams OOM in hf-demo)
         with torch.no_grad():
-            outputs = model.generate(**inputs, **gen_kwargs)
+            try:
+                outputs = model.generate(**inputs, **gen_kwargs)
+            except RuntimeError as e:
+                if args.preset == 'hf-demo' and ('out of memory' in str(e).lower() or 'cuda' in str(e).lower()):
+                    gen_kwargs.update(dict(do_sample=True))
+                    gen_kwargs.pop('num_beams', None)
+                    outputs = model.generate(**inputs, **gen_kwargs)
+                else:
+                    raise
 
         input_len = inputs['input_ids'].shape[1]
         new_tokens = outputs[0][input_len:] if outputs.shape[1] > input_len else outputs[0]
@@ -306,7 +407,7 @@ def main():
 
             chosen_list.append(chosen)
             results.append(chosen['clean'])
-        # Seam-aware merge on RAW outputs (dedup before cleaner), then run cleaner afterwards
+        # Seam-aware merge on RAW outputs (dedup before cleaner), then apply preset post-filters, then cleaner
         if len(chosen_list) >= 2:
             a_raw = chosen_list[0]['raw'] or ''
             b_raw = chosen_list[1]['raw'] or ''
@@ -355,6 +456,25 @@ def main():
                 merged = a_lines + [b_lines[i] for i in range(len(b_lines)) if keep_b[i]]
                 return "\n".join(merged)
             merged_raw = _seam_merge(a_raw, b_raw)
+            # Optional preset post-filters
+            def _hf_post_filters(s: str) -> str:
+                try:
+                    lines = []
+                    url = re.compile(r"https?://\S+|www\.[^\s]+", re.I)
+                    dims = re.compile(r"\b\d{2,4}x\d{2,4}\b", re.I)
+                    bad = re.compile(r"\b(?:bbox|box|category)\b", re.I)
+                    allowed = re.compile(r"[A-Za-z\d\u4e00-\u9fff]")
+                    for ln in (s or '').splitlines():
+                        if url.search(ln) or dims.search(ln) or bad.search(ln):
+                            continue
+                        if not allowed.search(ln):
+                            continue
+                        lines.append(ln)
+                    return "\n".join(lines)
+                except Exception:
+                    return s
+            if args.preset == 'hf-demo':
+                merged_raw = _hf_post_filters(merged_raw)
             final_text = _clean_ocr(merged_raw)
         else:
             final_text = "\n".join(results)
