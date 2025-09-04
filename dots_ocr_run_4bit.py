@@ -6,6 +6,7 @@ from PIL import Image
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Qwen2VLImageProcessor
 from ocr_cleaner import clean as _clean_ocr
+from ocr_cleaner import preclean_ui as _preclean_ui
 
 def load_image(path: str) -> Image.Image:
     return Image.open(path).convert('RGB')
@@ -126,6 +127,13 @@ def main():
             scale = (args.max_pixels/float(area))**0.5
             img = img.resize((max(1,int(w*scale)), max(1,int(h*scale))), Image.BICUBIC)
 
+    def _ui_char_count(s: str) -> int:
+        return sum(
+            1
+            for ch in (s or '')
+            if ch.isdigit() or ('a' <= ch.lower() <= 'z') or ('\u4e00' <= ch <= '\u9fff')
+        )
+
     def run_single(tile_img, prompt: str, *, beams: int, sample: bool, min_new_override: int | None = None):
         # Build chat string per tile
         prompt_txt = prompt
@@ -196,7 +204,10 @@ def main():
         if not raw_text:
             full = tokenizer.decode(outputs[0], skip_special_tokens=True)
             raw_text = full.split(prompt, 1)[-1].strip() if prompt in full else full.strip()
-        cleaned = _clean_ocr(raw_text) if (not args.no_clean and raw_text) else raw_text
+        # Pre-clean UI text, then default cleaner for per-tile display
+        pre_text, dropped = _preclean_ui(raw_text)
+        score = _ui_char_count(pre_text) - 2 * int(dropped)
+        cleaned = _clean_ocr(pre_text) if (not args.no_clean and pre_text) else pre_text
 
         dbg = {
             'image_hw': (tile_img.size[1], tile_img.size[0]),
@@ -206,7 +217,7 @@ def main():
             'prompt_tokens': int(new_input_ids.shape[1]),
             'new_tokens': int(max(0, outputs.shape[1] - input_len)),
         }
-        return {'raw': raw_text, 'clean': cleaned, 'dbg': dbg}
+        return {'raw': raw_text, 'pre': pre_text, 'pre_dropped': int(dropped), 'score': int(score), 'clean': cleaned, 'dbg': dbg}
 
     # Tiled path (wrapper around the stable single-image path)
     do_tile = bool(args.tile)
@@ -254,37 +265,27 @@ def main():
         tiles = _tile_image(img, tw, th, overlap)
         chosen_list = []
         for i, timg in enumerate(tiles, start=1):
-            # primary run: if --sample, prefer sampling; else beams=3. Always min_new>=128
-            if args.sample:
-                primary = run_single(timg, args.prompt, beams=1, sample=True, min_new_override=max(128, args.min_new))
-                primary_mode = 'sample'
-            else:
-                primary = run_single(timg, args.prompt, beams=3, sample=False, min_new_override=max(128, args.min_new))
-                primary_mode = 'beams(3)'
-            pm = metrics(primary['clean'])
+            # Primary: beams=3 (min_new>=128)
+            primary = run_single(timg, args.prompt, beams=3, sample=False, min_new_override=max(128, args.min_new))
             chosen = primary
-            mode = primary_mode
+            mode = 'beams(3)'
 
-            need_fb = pm['sparse']
-            fallback = None
-            if need_fb:
-                # fallback: sampling with min_new=128
+            # Score-based fallback trigger
+            if primary['score'] < 10:
                 fallback = run_single(timg, args.prompt, beams=1, sample=True, min_new_override=max(128, args.min_new))
-                chosen_text = better(primary['clean'], fallback['clean'])
-                chosen = fallback if chosen_text == fallback['clean'] else primary
+                chosen = fallback if fallback['score'] > primary['score'] else primary
                 mode = 'sample' if chosen is fallback else mode
 
                 # second-stage: still sparse? try narrower 800px center crop with sampling
-                cm = metrics(chosen['clean'])
-                if cm['sparse'] and timg.size[0] > 800:
+                # Further narrow if still weak score
+                if chosen['score'] < 10 and timg.size[0] > 800:
                     w, h = timg.size
                     new_w = 800
                     left = max(0, (w - new_w)//2)
                     right = min(w, left + new_w)
                     narrow = timg.crop((left, 0, right, h))
                     narrow_try = run_single(narrow, args.prompt, beams=1, sample=True, min_new_override=max(128, args.min_new))
-                    chosen_text2 = better(chosen['clean'], narrow_try['clean'])
-                    if chosen_text2 == narrow_try['clean']:
+                    if narrow_try['score'] > chosen['score']:
                         chosen = narrow_try
                         mode = 'sample-narrow'
 
