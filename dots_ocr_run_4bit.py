@@ -231,11 +231,8 @@ def main():
         chat = '<|user|><|img|><|imgpad|><|endofimg|>' + prompt_txt + '<|endofuser|><|assistant|>'
 
         toks = tokenizer(chat, return_tensors='pt')
-        # Use upstream processor/resizer when available (hf-demo)
-        if processor is not None:
-            vision = processor(images=[tile_img], return_tensors='pt')
-        else:
-            vision = image_processor(images=[tile_img], return_tensors='pt')
+        # Use image_processor (from processor when available)
+        vision = image_processor(images=[tile_img], return_tensors='pt')
 
         image_token_id = getattr(model.config, 'image_token_id', tokenizer.convert_tokens_to_ids('<|imgpad|>'))
         input_ids = toks['input_ids']

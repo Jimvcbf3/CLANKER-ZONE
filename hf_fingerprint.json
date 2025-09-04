@@ -1,0 +1,37 @@
+{
+  "processor_id": "/root/models/dots-ocr-4bit",
+  "processor_class": "Qwen2TokenizerFast",
+  "resize_policy": {
+    "size": null,
+    "resample": "None",
+    "do_resize": null,
+    "do_pad": null,
+    "pad_size": null
+  },
+  "norm": {
+    "image_mean": null,
+    "image_std": null,
+    "do_normalize": null
+  },
+  "chat_template": "{%- for m in messages %}\n    {%- if m.role == 'system' %}\n        {{- '<|system|>' + m.content + '<|endofsystem|>\\n' }}\n    {%- elif m.role == 'user' %}\n        {{- '<|user|>' + m.content + '<|endofuser|>' }}\n    {%- elif m.role == 'assistant' %}\n        {{- '<|assistant|>' + m.content }}\n        {%- if not loop.last %}\n            {{- '<|endofassistant|>' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if messages[-1].role != 'assistant' %}\n    {{- '<|assistant|>' }}\n{%- endif %}",
+  "decoding_defaults": {
+    "do_sample": false,
+    "num_beams": 1,
+    "max_new_tokens": null,
+    "min_new_tokens": null,
+    "repetition_penalty": 1.0,
+    "no_repeat_ngram_size": 0,
+    "temperature": 1.0,
+    "top_p": 1.0,
+    "top_k": 50,
+    "length_penalty": 1.0
+  },
+  "post_filters": {
+    "regex": [
+      "https?://\\\\S+|www\\\\.[^\\\\s]+",
+      "\\\\b\\\\d{2,4}x\\\\d{2,4}\\\\b",
+      "\\\\b(?:bbox|box|category)\\\\b"
+    ],
+    "charset": "ASCII + CJK"
+  }
+}
